@@ -5,30 +5,34 @@ namespace Contributte\Console\DI;
 use Contributte\Console\Application;
 use Contributte\Console\CommandLoader\ContainerCommandLoader;
 use Contributte\Console\Exception\Logical\InvalidArgumentException;
-use Contributte\DI\Helper\ExtensionDefinitionsHelper;
 use Nette\DI\CompilerExtension;
-use Nette\DI\Definitions\Definition;
-use Nette\DI\Definitions\ServiceDefinition;
-use Nette\DI\Definitions\Statement;
 use Nette\DI\MissingServiceException;
 use Nette\DI\ServiceCreationException;
+use Nette\DI\ServiceDefinition;
+use Nette\DI\Statement;
 use Nette\Http\Request;
 use Nette\Http\UrlScript;
-use Nette\Schema\Expect;
-use Nette\Schema\Schema;
 use Nette\Utils\Arrays;
-use stdClass;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\CommandLoader\CommandLoaderInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
-/**
- * @property-read stdClass $config
- */
 class ConsoleExtension extends CompilerExtension
 {
 
 	public const COMMAND_TAG = 'console.command';
+
+	/** @var mixed[] */
+	private $defaults = [
+		'url' => null,
+		'name' => null,
+		'version' => null,
+		'catchExceptions' => null,
+		'autoExit' => null,
+		'helperSet' => null,
+		'helpers' => [],
+		'lazy' => false,
+	];
 
 	/** @var bool */
 	private $cliMode;
@@ -42,22 +46,6 @@ class ConsoleExtension extends CompilerExtension
 		$this->cliMode = $cliMode;
 	}
 
-	public function getConfigSchema(): Schema
-	{
-		return Expect::structure([
-			'url' => Expect::anyOf(Expect::string(), Expect::null()),
-			'name' => Expect::string(),
-			'version' => Expect::anyOf(Expect::string(), Expect::int(), Expect::float()),
-			'catchExceptions' => Expect::bool(),
-			'autoExit' => Expect::bool(),
-			'helperSet' => Expect::anyOf(Expect::string(), Expect::type(Statement::class)),
-			'helpers' => Expect::arrayOf(
-				Expect::anyOf(Expect::string(), Expect::array(), Expect::type(Statement::class))
-			),
-			'lazy' => Expect::bool(true),
-		]);
-	}
-
 	/**
 	 * Register services
 	 */
@@ -69,54 +57,34 @@ class ConsoleExtension extends CompilerExtension
 		}
 
 		$builder = $this->getContainerBuilder();
-		$config = $this->config;
-		$defhelp = new ExtensionDefinitionsHelper($this->compiler);
+		$config = $this->validateConfig($this->defaults);
 
 		// Register Symfony Console Application
 		$applicationDef = $builder->addDefinition($this->prefix('application'))
 			->setFactory(Application::class);
 
 		// Setup console name
-		if ($config->name !== null) {
-			$applicationDef->addSetup('setName', [$config->name]);
+		if ($config['name'] !== null) {
+			$applicationDef->addSetup('setName', [$config['name']]);
 		}
 
 		// Setup console version
-		if ($config->version !== null) {
-			$applicationDef->addSetup('setVersion', [(string) $config->version]);
+		if ($config['version'] !== null) {
+			$applicationDef->addSetup('setVersion', [(string) $config['version']]);
 		}
 
 		// Catch or populate exceptions
-		if ($config->catchExceptions !== null) {
-			$applicationDef->addSetup('setCatchExceptions', [$config->catchExceptions]);
+		if ($config['catchExceptions'] !== null) {
+			$applicationDef->addSetup('setCatchExceptions', [$config['catchExceptions']]);
 		}
 
 		// Call die() or not
-		if ($config->autoExit !== null) {
-			$applicationDef->addSetup('setAutoExit', [$config->autoExit]);
-		}
-
-		// Register given or default HelperSet
-		if ($config->helperSet !== null) {
-			$applicationDef->addSetup('setHelperSet', [
-				$defhelp->getDefinitionFromConfig($config->helperSet, $this->prefix('helperSet')),
-			]);
-		}
-
-		// Register extra helpers
-		foreach ($config->helpers as $helperName => $helperConfig) {
-			$helperPrefix = $this->prefix('helper.' . $helperName);
-			$helperDef = $defhelp->getDefinitionFromConfig($helperConfig, $helperPrefix);
-
-			if ($helperDef instanceof Definition) {
-				$helperDef->setAutowired(false);
-			}
-
-			$applicationDef->addSetup('?->getHelperSet()->set(?)', ['@self', $helperDef]);
+		if ($config['autoExit'] !== null) {
+			$applicationDef->addSetup('setAutoExit', [$config['autoExit']]);
 		}
 
 		// Commands lazy loading
-		if ($config->lazy) {
+		if ($config['lazy']) {
 			$builder->addDefinition($this->prefix('commandLoader'))
 				->setType(CommandLoaderInterface::class)
 				->setFactory(ContainerCommandLoader::class);
@@ -125,7 +93,7 @@ class ConsoleExtension extends CompilerExtension
 		}
 
 		// Export types
-		$this->compiler->addExportedType(Application::class);
+		$this->compiler->addDependencies([Application::class]);
 	}
 
 	/**
@@ -139,23 +107,23 @@ class ConsoleExtension extends CompilerExtension
 		}
 
 		$builder = $this->getContainerBuilder();
-		$config = $this->config;
+		$config = $this->validateConfig($this->defaults);
 
 		/** @var ServiceDefinition $applicationDef */
 		$applicationDef = $builder->getDefinition($this->prefix('application'));
 
 		// Setup URL for CLI
-		if ($config->url !== null && $builder->hasDefinition('http.request')) {
+		if ($config['url'] !== null && $builder->hasDefinition('http.request')) {
 			/** @var ServiceDefinition $httpDef */
 			$httpDef = $builder->getDefinition('http.request');
-			$httpDef->setFactory(Request::class, [new Statement(UrlScript::class, [$config->url])]);
+			$httpDef->setFactory(Request::class, [new Statement(UrlScript::class, [$config['url']])]);
 		}
 
 		// Register all commands (if they are not lazy-loaded)
 		// otherwise build a command map for command loader
 		$commands = $builder->findByType(Command::class);
 
-		if (!$config->lazy) {
+		if (!$config['lazy']) {
 			// Iterate over all commands and add to console
 			foreach ($commands as $serviceName => $service) {
 				$applicationDef->addSetup('add', [$service]);
