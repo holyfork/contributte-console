@@ -18,7 +18,7 @@
   "require": {
     "php": ">=8.0 <8.1",
     "contributte/di": "^0.3.1",
-    "symfony/console": "^5.0.0|^6.0.0"
+    "symfony/console": "^5.0.0"
   },
   "require-dev": {
     "nette/http": "~2.4.10",
